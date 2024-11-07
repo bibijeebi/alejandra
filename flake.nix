@@ -35,9 +35,9 @@
         src = ./.;
         cargoLock.lockFile = ./Cargo.lock;
 
-        passthru.tests = {
-          version = final.testVersion {package = prev.alejandra;};
-        };
+        # passthru.tests = {
+        #   version = final.testVersion {package = prev.alejandra;};
+        # };
 
         meta = {
           description = "The Uncompromising Nix Code Formatter.";

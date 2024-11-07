@@ -47,6 +47,22 @@ struct CLIArgs {
     /// twice to hide error messages.
     #[clap(long, short, action = ArgAction::Count)]
     quiet: u8,
+
+    /// Sort attribute sets alphabetically
+    #[clap(long)]
+    sort_attrs: bool,
+
+    /// Sort flake inputs into categories:
+    /// 1. nixpkgs sources
+    /// 2. independent flakes
+    /// 3. nixpkgs-dependent flakes
+    /// 4. non-standard/flake=false entries
+    #[clap(long)]
+    sort_flake: bool,
+
+    /// Keep "self" attribute first when sorting
+    #[clap(long, default_value = "true")]
+    keep_self_first: bool,
 }
 
 #[derive(Clone)]
@@ -55,7 +71,7 @@ struct FormattedPath {
     pub status: alejandra::format::Status,
 }
 
-fn format_stdin(verbosity: Verbosity) -> FormattedPath {
+fn format_stdin(verbosity: Verbosity, options: alejandra::config::FormattingOptions) -> FormattedPath {
     let mut before = String::new();
     let path = "<anonymous file on stdin>".to_string();
 
@@ -70,7 +86,7 @@ fn format_stdin(verbosity: Verbosity) -> FormattedPath {
         .expect("Unable to read stdin.");
 
     let (status, data) =
-        alejandra::format::in_memory(path.clone(), before.clone());
+        alejandra::format::in_memory(path.clone(), before.clone(), options);
 
     print!("{data}");
 
@@ -82,6 +98,7 @@ fn format_paths(
     in_place: bool,
     verbosity: Verbosity,
     threads: usize,
+    options: alejandra::config::FormattingOptions,
 ) -> Vec<FormattedPath> {
     let paths_len = paths.len();
 
@@ -103,7 +120,12 @@ fn format_paths(
         .into_iter()
         .map(|path| {
             pool.spawn_with_handle(async move {
-                let status = alejandra::format::in_fs(path.clone(), in_place);
+                let options = options.clone();
+                let status = alejandra::format::in_fs(
+                    path.clone(), 
+                    in_place,
+                    options,
+                );
 
                 if let alejandra::format::Status::Changed(changed) = status {
                     if changed && verbosity.allows_info() {
@@ -144,14 +166,20 @@ pub fn main() -> std::io::Result<()> {
         _ => Verbosity::NoErrors,
     };
 
+    let options = alejandra::config::FormattingOptions {
+        sort_attrs: args.sort_attrs,
+        sort_flake: args.sort_flake,
+        keep_self_first: args.keep_self_first,
+    };
+
     let formatted_paths = match &include[..] {
         &[] | &["-"] => {
-            vec![crate::cli::format_stdin(verbosity)]
+            vec![crate::cli::format_stdin(verbosity, options.clone())]
         }
         include => {
             let paths = crate::find::nix_files(include, &args.exclude);
 
-            crate::cli::format_paths(paths, in_place, verbosity, threads)
+            crate::cli::format_paths(paths, in_place, verbosity, threads, options)
         }
     };
 
