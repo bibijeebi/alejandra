@@ -3,7 +3,6 @@ pub(crate) fn rule(
     node: &rnix::SyntaxNode,
 ) -> std::collections::LinkedList<crate::builder::Step> {
     let mut steps = std::collections::LinkedList::new();
-
     let mut children = crate::children::Children::new(build_ctx, node);
 
     let items_count = node
@@ -64,64 +63,46 @@ pub(crate) fn rule(
         steps.push_back(crate::builder::Step::Indent);
     }
 
-    let mut item_index: usize = 0;
-    let mut inline_next_comment = false;
-
-    loop {
-        // /**/
-        children.drain_trivia(|element| match element {
-            crate::children::Trivia::Comment(text) => {
-                if inline_next_comment && text.starts_with('#') {
-                    steps.push_back(crate::builder::Step::Whitespace);
-                } else {
-                    steps.push_back(crate::builder::Step::NewLine);
-                    steps.push_back(crate::builder::Step::Pad);
-                }
-                steps.push_back(crate::builder::Step::Comment(text));
-                item_index += 1;
-                inline_next_comment = false;
-            }
-            crate::children::Trivia::Whitespace(text) => {
-                let newlines = crate::utils::count_newlines(&text);
-
-                if newlines > 1 && item_index > 0 && item_index < items_count {
-                    steps.push_back(crate::builder::Step::NewLine);
-                }
-
-                inline_next_comment = newlines == 0;
-            }
-        });
-
-        if let Some(child) = children.peek_next() {
-            if let rnix::SyntaxKind::TOKEN_CURLY_B_CLOSE = child.kind() {
-                break;
-            }
-
-            // item
-            item_index += 1;
-            if vertical {
-                steps.push_back(crate::builder::Step::NewLine);
-                steps.push_back(crate::builder::Step::Pad);
-                steps.push_back(crate::builder::Step::FormatWider(child));
-            } else {
-                if item_index > 1 {
-                    steps.push_back(crate::builder::Step::Whitespace);
-                }
-                steps.push_back(crate::builder::Step::Format(child));
-            }
+    // Collect entries
+    let mut entries = Vec::new();
+    while let Some(child) = children.peek_next() {
+        if matches!(
+            child.kind(),
+            rnix::SyntaxKind::NODE_KEY_VALUE | rnix::SyntaxKind::NODE_INHERIT
+        ) {
+            entries.push(child.clone());
             children.move_next();
-            inline_next_comment = true;
+        } else if child.kind() == rnix::SyntaxKind::TOKEN_CURLY_B_CLOSE {
+            break;
+        } else {
+            children.move_next();
+        }
+    }
+
+    // Sort entries by key name
+    let sorted_entries = crate::sort::sort_attr_set_entries(&entries);
+
+    // Format sorted entries
+    for entry in sorted_entries {
+        if vertical {
+            steps.push_back(crate::builder::Step::NewLine);
+            steps.push_back(crate::builder::Step::Pad);
+            steps.push_back(crate::builder::Step::FormatWider(entry));
+        } else {
+            if entries.len() > 1 {
+                steps.push_back(crate::builder::Step::Whitespace);
+            }
+            steps.push_back(crate::builder::Step::Format(entry));
         }
     }
 
     // }
-    let child = children.get_next().unwrap();
     if vertical {
         steps.push_back(crate::builder::Step::Dedent);
         steps.push_back(crate::builder::Step::NewLine);
         steps.push_back(crate::builder::Step::Pad);
     }
-    steps.push_back(crate::builder::Step::Format(child));
+    steps.push_back(crate::builder::Step::Format(children.get_next().unwrap()));
 
     steps
 }
